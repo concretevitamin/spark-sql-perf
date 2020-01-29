@@ -129,25 +129,6 @@ class TPCHTables(
       'o_shippriority.int,
       'o_comment.string
     ),
-    Table("lineitem",
-      partitionColumns = "l_shipdate" :: Nil,
-      'l_orderkey.long,
-      'l_partkey.long,
-      'l_suppkey.long,
-      'l_linenumber.int,
-      'l_quantity.decimal(12, 2),
-      'l_extendedprice.decimal(12, 2),
-      'l_discount.decimal(12, 2),
-      'l_tax.decimal(12, 2),
-      'l_returnflag.string,
-      'l_linestatus.string,
-      'l_shipdate.date,
-      'l_commitdate.date,
-      'l_receiptdate.date,
-      'l_shipinstruct.string,
-      'l_shipmode.string,
-      'l_comment.string
-    ),
     Table("nation",
       partitionColumns = Nil,
       'n_nationkey.long,
@@ -161,6 +142,26 @@ class TPCHTables(
       'r_name.string,
       'r_comment.string
     )
+    // Table("lineitem",
+    //   partitionColumns = "l_shipdate" :: Nil,
+    //   'l_orderkey.long,
+    //   'l_partkey.long,
+    //   'l_suppkey.long,
+    //   'l_linenumber.int,
+    //   'l_quantity.decimal(12, 2),
+    //   'l_extendedprice.decimal(12, 2),
+    //   'l_discount.decimal(12, 2),
+    //   'l_tax.decimal(12, 2),
+    //   'l_returnflag.string,
+    //   'l_linestatus.string,
+    //   'l_shipdate.date,
+    //   'l_commitdate.date,
+    //   'l_receiptdate.date,
+    //   'l_shipinstruct.string,
+    //   'l_shipmode.string,
+    //   'l_comment.string
+    // )
+
   ).map(_.convertTypes())
 }
 

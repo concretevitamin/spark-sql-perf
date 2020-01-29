@@ -17,6 +17,7 @@
 package com.databricks.spark.sql.perf
 
 import java.util.concurrent.LinkedBlockingQueue
+import java.lang.System
 
 import scala.collection.immutable.Stream
 import scala.sys.process._
@@ -241,6 +242,7 @@ abstract class Tables(sqlContext: SQLContext, scaleFactor: String,
       log.info(s"Generating table $name in database to $location with save mode $mode.")
       writer.save(location)
       sqlContext.dropTempTable(tempTableName)
+      System.gc()
     }
 
     def createExternalTable(location: String, format: String, databaseName: String,
@@ -266,7 +268,7 @@ abstract class Tables(sqlContext: SQLContext, scaleFactor: String,
     def createTemporaryTable(location: String, format: String): Unit = {
       println(s"Creating temporary table $name using data stored in $location.")
       log.info(s"Creating temporary table $name using data stored in $location.")
-      sqlContext.read.format(format).load(location).createOrReplaceTempView(name)
+      sqlContext.read.format(format).schema(schema).load(location).createOrReplaceTempView(name)
     }
 
     def analyzeTable(databaseName: String, analyzeColumns: Boolean = false): Unit = {

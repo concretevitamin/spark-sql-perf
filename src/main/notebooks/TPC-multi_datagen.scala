@@ -1,22 +1,22 @@
 // Databricks notebook source
 // Multi TPC- H and DS generator and database importer using spark-sql-perf, typically to generate parquet files in S3/blobstore objects
-val benchmarks = Seq("TPCDS", "TPCH") // Options: TCPDS", "TPCH"
-val scaleFactors = Seq("1", "10", "100", "1000", "10000") // "1", "10", "100", "1000", "10000" list of scale factors to generate and import
+val benchmarks = Seq("TPCH") // Options: TCPDS", "TPCH"
+val scaleFactors = Seq("1000") // "1", "10", "100", "1000", "10000" list of scale factors to generate and import
 
-val baseLocation = s"s3a://mybucket" // S3 bucket, blob, or local root path
-val baseDatagenFolder = "/tmp"  // usually /tmp if enough space is available for datagen files
+val baseLocation = s"/mnt-hdd" // S3 bucket, blob, or local root path
+val baseDatagenFolder = "/mnt-hdd"  // usually /tmp if enough space is available for datagen files
 
 // Output file formats
-val fileFormat = "parquet" // only parquet was tested
-val shuffle = true // If true, partitions will be coalesced into a single file during generation up to spark.sql.files.maxRecordsPerFile (if set)
-val overwrite = false //if to delete existing files (doesn't check if results are complete on no-overwrite)
+val fileFormat = "csv" // only parquet was tested
+val shuffle = false // If true, partitions will be coalesced into a single file during generation up to spark.sql.files.maxRecordsPerFile (if set)
+val overwrite = true //if to delete existing files (doesn't check if results are complete on no-overwrite)
 
 // Generate stats for CBO
 val createTableStats = true
 val createColumnStats = true
 
-val workers: Int = spark.conf.get("spark.databricks.clusterUsageTags.clusterTargetWorkers").toInt //number of nodes, assumes one executor per node
-val cores: Int = Runtime.getRuntime.availableProcessors.toInt //number of CPU-cores
+val workers: Int = 1 //spark.conf.get("spark.databricks.clusterUsageTags.clusterTargetWorkers").toInt //number of nodes, assumes one executor per node
+val cores: Int = 10 // Runtime.getRuntime.availableProcessors.toInt //number of CPU-cores
 
 val dbSuffix = "" // set only if creating multiple DBs or source file folders with different settings, use a leading _
 val TPCDSUseLegacyOptions = false // set to generate file/DB naming and table options compatible with older results
@@ -39,8 +39,8 @@ import org.apache.spark.deploy.SparkHadoopUtil
 
 // COMMAND ----------
 
-// Set Spark config to produce same and comparable source files across systems 
-// do not change unless you want to derive from default source file composition, in that case also set a DB suffix 
+// Set Spark config to produce same and comparable source files across systems
+// do not change unless you want to derive from default source file composition, in that case also set a DB suffix
 spark.sqlContext.setConf("spark.sql.parquet.compression.codec", "snappy")
 
 // Prevent very large files. 20 million records creates between 500 and 1500MB files in TPCH
@@ -51,7 +51,7 @@ spark.sqlContext.setConf("spark.sql.files.maxRecordsPerFile", "20000000")  // Th
 // Checks that we have the correct number of worker nodes to start the data generation
 // Make sure you have set the workers variable correctly, as the datagens binaries need to be present in all nodes
 val targetWorkers: Int = workers
-def numWorkers: Int = sc.getExecutorMemoryStatus.size - 1
+def numWorkers: Int = sc.getExecutorMemoryStatus.size
 def waitForWorkers(requiredWorkers: Int, tries: Int) : Unit = {
   for (i <- 0 to (tries-1)) {
     if (numWorkers == requiredWorkers) {
@@ -59,7 +59,7 @@ def waitForWorkers(requiredWorkers: Int, tries: Int) : Unit = {
       return
     }
     if (i % 60 == 0) println(s"Waiting ${i}s. for workers to be ready, got only $numWorkers workers")
-    Thread sleep 1000
+    Thread sleep 10
   }
   throw new Exception(s"Timed out waiting for workers to be ready after ${tries}s.")
 }
@@ -68,7 +68,7 @@ waitForWorkers(targetWorkers, 3600) //wait up to an hour
 // COMMAND ----------
 
 // Time command helper
-def time[R](block: => R): R = {  
+def time[R](block: => R): R = {
     val t0 = System.currentTimeMillis() //nanoTime()
     val result = block    // call-by-name
     val t1 = System.currentTimeMillis() //nanoTime()
@@ -140,19 +140,19 @@ val res = spark.range(0, workers, 1, workers).map(worker => benchmarks.map{
 // COMMAND ----------
 
 // Set the benchmark name, tables, and location for each benchmark
-// returns (dbname, tables, location) 
-def getBenchmarkData(benchmark: String, scaleFactor: String) = benchmark match {  
-  
+// returns (dbname, tables, location)
+def getBenchmarkData(benchmark: String, scaleFactor: String) = benchmark match {
+
   case "TPCH" => (
     s"tpch_sf${scaleFactor}_${fileFormat}${dbSuffix}",
     new TPCHTables(spark.sqlContext, dbgenDir = s"${baseDatagenFolder}/dbgen", scaleFactor = scaleFactor, useDoubleForDecimal = false, useStringForDate = false, generatorParams = Nil),
-    s"$baseLocation/tpch/sf${scaleFactor}_${fileFormat}")  
-  
+    s"$baseLocation/tpch/sf${scaleFactor}_${fileFormat}")
+
   case "TPCDS" if !TPCDSUseLegacyOptions => (
     s"tpcds_sf${scaleFactor}_${fileFormat}${dbSuffix}",
     new TPCDSTables(spark.sqlContext, dsdgenDir = s"${baseDatagenFolder}/dsdgen", scaleFactor = scaleFactor, useDoubleForDecimal = false, useStringForDate = false),
     s"$baseLocation/tpcds-2.4/sf${scaleFactor}_${fileFormat}")
-  
+
   case "TPCDS" if TPCDSUseLegacyOptions => (
     s"tpcds_sf${scaleFactor}_nodecimal_nodate_withnulls${dbSuffix}",
     new TPCDSTables(spark.sqlContext, s"${baseDatagenFolder}/dsdgen", scaleFactor = scaleFactor, useDoubleForDecimal = true, useStringForDate = true),
@@ -162,7 +162,7 @@ def getBenchmarkData(benchmark: String, scaleFactor: String) = benchmark match {
 // COMMAND ----------
 
 // Data generation
-def isPartitioned (tables: Tables, tableName: String) : Boolean = 
+def isPartitioned (tables: Tables, tableName: String) : Boolean =
   util.Try(tables.tables.find(_.name == tableName).get.partitionColumns.nonEmpty).getOrElse(false)
 
 def loadData(tables: Tables, location: String, scaleFactor: String) = {
@@ -171,16 +171,16 @@ def loadData(tables: Tables, location: String, scaleFactor: String) = {
   // generate data
     time {
       tables.genData(
-        location = location, 
-        format = fileFormat, 
-        overwrite = overwrite, 
-        partitionTables = true, 
-        // if to coallesce into a single file (only one writter for non partitioned tables = slow) 
-        clusterByPartitionColumns = shuffle, //if (isPartitioned(tables, tableName)) false else true, 
-        filterOutNullPartitionValues = false, 
+        location = location,
+        format = fileFormat,
+        overwrite = overwrite,
+        partitionTables = true,
+        // if to coallesce into a single file (only one writter for non partitioned tables = slow)
+        clusterByPartitionColumns = shuffle, //if (isPartitioned(tables, tableName)) false else true,
+        filterOutNullPartitionValues = false,
         tableFilter = tableName,
         // this controlls parallelism on datagen and number of writers (# of files for non-partitioned)
-        // in general we want many writers to S3, and smaller tasks for large scale factors to avoid OOM and shuffle errors    
+        // in general we want many writers to S3, and smaller tasks for large scale factors to avoid OOM and shuffle errors
         numPartitions = if (scaleFactor.toInt <= 100 || !isPartitioned(tables, tableName)) (workers * cores) else (workers * cores * 4))
     }
   }
@@ -195,9 +195,9 @@ def createExternal(location: String, dbname: String, tables: Tables) = {
 
 def loadDB(dbname: String, tables: Tables, location: String) = {
   val tableNames = tables.tables.map(_.name)
-  time { 
+  time {
     println(s"Creating external tables at $location")
-    createExternal(location, dbname, tables) 
+    createExternal(location, dbname, tables)
   }
   // Show table information and attempt to vacuum
   tableNames.foreach { tableName =>
@@ -213,17 +213,17 @@ def loadDB(dbname: String, tables: Tables, location: String) = {
 def setScaleConfig(scaleFactor: String): Unit = {
   // Avoid OOM when shuffling large scale fators
   // and errors like 2GB shuffle limit at 10TB like: Most recent failure reason: org.apache.spark.shuffle.FetchFailedException: Too large frame: 9640891355
-  // For 10TB 16x4core nodes were needed with the config below, 8x for 1TB and below. 
+  // For 10TB 16x4core nodes were needed with the config below, 8x for 1TB and below.
   // About 24hrs. for SF 1 to 10,000.
-  if (scaleFactor.toInt >= 10000) {    
+  if (scaleFactor.toInt >= 10000) {
     spark.conf.set("spark.sql.shuffle.partitions", "20000")
     SparkHadoopUtil.get.conf.set("parquet.memory.pool.ratio", "0.1")
-  } 
+  }
   else if (scaleFactor.toInt >= 1000) {
     spark.conf.set("spark.sql.shuffle.partitions", "2001") //one above 2000 to use HighlyCompressedMapStatus
-    SparkHadoopUtil.get.conf.set("parquet.memory.pool.ratio", "0.3")    
+    SparkHadoopUtil.get.conf.set("parquet.memory.pool.ratio", "0.3")
   }
-  else { 
+  else {
     spark.conf.set("spark.sql.shuffle.partitions", "200") //default
     SparkHadoopUtil.get.conf.set("parquet.memory.pool.ratio", "0.5")
   }
@@ -233,10 +233,10 @@ def setScaleConfig(scaleFactor: String): Unit = {
 
 // Generate the data, import the tables, generate stats for selected benchmarks and scale factors
 scaleFactors.foreach { scaleFactor => {
-  
+
   // First set some config settings affecting OOMs/performance
   setScaleConfig(scaleFactor)
-  
+
   benchmarks.foreach{ benchmark => {
     val (dbname, tables, location) = getBenchmarkData(benchmark, scaleFactor)
     // Start the actual loading
@@ -248,7 +248,7 @@ scaleFactors.foreach { scaleFactor => {
       println(s"\nImporting data for $benchmark into DB $dbname from $location")
       loadDB(dbname = dbname, tables = tables, location = location)
     }
-    if (createTableStats) time { 
+    if (createTableStats) time {
       println(s"\nGenerating table statistics for DB $dbname (with analyzeColumns=$createColumnStats)")
       tables.analyzeTables(dbname, analyzeColumns = createColumnStats)
     }
@@ -264,13 +264,13 @@ scaleFactors.foreach { scaleFactor =>
     val (dbname, tables, location) = getBenchmarkData(benchmark, scaleFactor)
     sql(s"use $dbname")
     time {
-      sql(s"show tables").select("tableName").collect().foreach{ tableName =>        
+      sql(s"show tables").select("tableName").collect().foreach{ tableName =>
         val name: String = tableName.toString().drop(1).dropRight(1)
         println(s"Printing table information for $benchmark SF $scaleFactor table $name")
         val count = sql(s"select count(*) as ${name}_count from $name").collect()(0)(0)
         println(s"Table $name has " + util.Try(sql(s"SHOW PARTITIONS $name").count() + " partitions").getOrElse(s"no partitions") + s" and $count rows.")
         sql(s"describe extended $name").show(999, false)
-      } 
+      }
     }
     println
   }}
